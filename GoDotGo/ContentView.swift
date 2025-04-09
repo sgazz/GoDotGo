@@ -9,7 +9,7 @@ import SwiftUI
 
 struct Circle2D {
     var position: CGPoint
-    var isAnimating: Bool = true
+    var isPlaced: Bool = false  // Da li je tačka postavljena na canvas
     var color: Color = .red
     var connections: Int = 0
 }
@@ -31,6 +31,7 @@ struct MainView: View {
     @State private var greenCircles: [Circle2D] = []
     @State private var canvasSize: CGSize = .zero
     @State private var startPoint: CGPoint?
+    @State private var showInvalidPlacementMessage: Bool = false
     
     private let snapDistance: CGFloat = 15.0
     
@@ -39,12 +40,16 @@ struct MainView: View {
     }
     
     private func findNearestCircle(to point: CGPoint) -> CGPoint? {
-        let allCircles = placedCircles + blueCircles + greenCircles
+        // Uzimamo samo postavljene krugove
+        let allCircles = placedCircles + 
+                        blueCircles.filter { $0.isPlaced } + 
+                        greenCircles.filter { $0.isPlaced }
         
-        return allCircles.compactMap { circle in
-            let distance = hypot(circle.position.x - point.x, circle.position.y - point.y)
-            return distance <= snapDistance ? circle.position : nil
-        }.first
+        return allCircles.map { $0.position }
+            .first { circlePosition in
+                let distance = hypot(circlePosition.x - point.x, circlePosition.y - point.y)
+                return distance <= snapDistance
+            }
     }
     
     private func isValidLine(from start: CGPoint, to end: CGPoint) -> Bool {
@@ -56,17 +61,12 @@ struct MainView: View {
     }
     
     private func createGameCircles(in size: CGSize) -> (blue: [Circle2D], green: [Circle2D]) {
-        let spacing: CGFloat = size.width / 8 // 7 circles + spacing
-        let startX: CGFloat = spacing
-        let blueY: CGFloat = size.height / 3
-        let greenY: CGFloat = 2 * size.height / 3
-        
-        let blue = (0..<7).map { index in
-            Circle2D(position: CGPoint(x: startX + spacing * CGFloat(index), y: blueY), color: .blue)
+        let blue = (0..<7).map { _ in
+            Circle2D(position: .zero, color: .blue)
         }
         
-        let green = (0..<7).map { index in
-            Circle2D(position: CGPoint(x: startX + spacing * CGFloat(index), y: greenY), color: .green)
+        let green = (0..<7).map { _ in
+            Circle2D(position: .zero, color: .green)
         }
         
         return (blue, green)
@@ -109,6 +109,107 @@ struct MainView: View {
         }
     }
     
+    private func distanceFromPointToLine(point: CGPoint, lineStart: CGPoint, lineEnd: CGPoint) -> CGFloat {
+        let a = lineEnd.y - lineStart.y
+        let b = lineStart.x - lineEnd.x
+        let c = lineEnd.x * lineStart.y - lineStart.x * lineEnd.y
+        
+        let distance = abs(a * point.x + b * point.y + c) / sqrt(a * a + b * b)
+        return distance
+    }
+    
+    private func isPointOnLine(point: CGPoint, line: Line) -> Bool {
+        let snapDistance: CGFloat = 10.0 // Rastojanje za snap na liniju
+        
+        for i in 0..<line.points.count-1 {
+            let start = line.points[i]
+            let end = line.points[i+1]
+            
+            // Proveri da li je tačka blizu segmenta linije
+            let distance = distanceFromPointToLine(point: point, lineStart: start, lineEnd: end)
+            
+            if distance <= snapDistance {
+                // Proveri da li je tačka između početka i kraja segmenta
+                let minX = min(start.x, end.x) - snapDistance
+                let maxX = max(start.x, end.x) + snapDistance
+                let minY = min(start.y, end.y) - snapDistance
+                let maxY = max(start.y, end.y) + snapDistance
+                
+                if point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+    
+    private func isPointNearExistingPlacedPoint(point: CGPoint) -> Bool {
+        let minDistance: CGFloat = 20.0
+        
+        // Proveri postavljene plave tačke
+        for circle in blueCircles where circle.isPlaced {
+            let distance = hypot(point.x - circle.position.x, point.y - circle.position.y)
+            if distance < minDistance {
+                return true
+            }
+        }
+        
+        // Proveri postavljene zelene tačke
+        for circle in greenCircles where circle.isPlaced {
+            let distance = hypot(point.x - circle.position.x, point.y - circle.position.y)
+            if distance < minDistance {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    private func isValidPointPlacement(at point: CGPoint) -> Bool {
+        // Ako je tačka preblizu postojećoj postavljenoj tački, nije validna
+        if isPointNearExistingPlacedPoint(point: point) {
+            return false
+        }
+        
+        // Proveri da li je tačka na nekoj liniji
+        for line in lines {
+            if isPointOnLine(point: point, line: line) {
+                return true
+            }
+        }
+        return false
+    }
+    
+    private func updateCircleAnimations() {
+        // Ažuriraj plave krugove
+        for i in 0..<blueCircles.count {
+            var shouldAnimate = false
+            for line in lines {
+                if isPointOnLine(point: blueCircles[i].position, line: line) {
+                    shouldAnimate = true
+                    break
+                }
+            }
+            if blueCircles[i].isPlaced != shouldAnimate {
+                blueCircles[i].isPlaced = shouldAnimate
+            }
+        }
+        
+        // Ažuriraj zelene krugove
+        for i in 0..<greenCircles.count {
+            var shouldAnimate = false
+            for line in lines {
+                if isPointOnLine(point: greenCircles[i].position, line: line) {
+                    shouldAnimate = true
+                    break
+                }
+            }
+            if greenCircles[i].isPlaced != shouldAnimate {
+                greenCircles[i].isPlaced = shouldAnimate
+            }
+        }
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 40) {
@@ -145,6 +246,7 @@ struct MainView: View {
 
                 VStack(spacing: 10) {
                     if !gameStarted {
+                        // Prikaz crvenih tačaka pre starta igre
                         HStack(spacing: 15) {
                             ForEach(0..<7, id: \.self) { index in
                                 if availableCircles.contains(index) {
@@ -158,7 +260,7 @@ struct MainView: View {
                                             if pulsingCircles.contains(index) {
                                                 pulsingCircles.remove(index)
                                             } else {
-                                                pulsingCircles.insert(index)
+                                                pulsingCircles = [index]
                                             }
                                         }
                                 } else {
@@ -168,19 +270,51 @@ struct MainView: View {
                             }
                         }
                     } else {
+                        // Prikaz plavih tačaka
                         HStack(spacing: 15) {
-                            ForEach(0..<7, id: \.self) { _ in
-                                Circle()
-                                    .fill(Color.blue)
-                                    .frame(width: 20, height: 20)
+                            ForEach(0..<7, id: \.self) { index in
+                                if !blueCircles[index].isPlaced {
+                                    Circle()
+                                        .fill(Color.blue)
+                                        .frame(width: 20, height: 20)
+                                        .scaleEffect(pulsingCircles.contains(index) ? 1.3 : 1.0)
+                                        .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true),
+                                                 value: pulsingCircles.contains(index))
+                                        .onTapGesture {
+                                            if pulsingCircles.contains(index) {
+                                                pulsingCircles.remove(index)
+                                            } else {
+                                                pulsingCircles = [index]
+                                            }
+                                        }
+                                } else {
+                                    Color.clear
+                                        .frame(width: 20, height: 20)
+                                }
                             }
                         }
                         
+                        // Prikaz zelenih tačaka
                         HStack(spacing: 15) {
-                            ForEach(0..<7, id: \.self) { _ in
-                                Circle()
-                                    .fill(Color.green)
-                                    .frame(width: 20, height: 20)
+                            ForEach(0..<7, id: \.self) { index in
+                                if !greenCircles[index].isPlaced {
+                                    Circle()
+                                        .fill(Color.green)
+                                        .frame(width: 20, height: 20)
+                                        .scaleEffect(pulsingCircles.contains(index + 7) ? 1.3 : 1.0)
+                                        .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true),
+                                                 value: pulsingCircles.contains(index + 7))
+                                        .onTapGesture {
+                                            if pulsingCircles.contains(index + 7) {
+                                                pulsingCircles.remove(index + 7)
+                                            } else {
+                                                pulsingCircles = [index + 7]
+                                            }
+                                        }
+                                } else {
+                                    Color.clear
+                                        .frame(width: 20, height: 20)
+                                }
                             }
                         }
                     }
@@ -194,6 +328,7 @@ struct MainView: View {
                     let circles = createGameCircles(in: canvasSize)
                     blueCircles = circles.blue
                     greenCircles = circles.green
+                    updateCircleAnimations() // Proveri inicijalne animacije
                 }) {
                     Text("Start Game")
                         .font(.title)
@@ -240,6 +375,24 @@ struct MainView: View {
                                 }
                                 context.stroke(path, with: .color(currentLine.color), style: strokeStyle)
                             }
+                        }
+                        
+                        // Draw placed blue circles
+                        for circle in blueCircles where circle.isPlaced {
+                            let circlePath = Path(ellipseIn: CGRect(x: circle.position.x - 10,
+                                                                   y: circle.position.y - 10,
+                                                                   width: 20,
+                                                                   height: 20))
+                            context.fill(circlePath, with: .color(.blue))
+                        }
+                        
+                        // Draw placed green circles
+                        for circle in greenCircles where circle.isPlaced {
+                            let circlePath = Path(ellipseIn: CGRect(x: circle.position.x - 10,
+                                                                   y: circle.position.y - 10,
+                                                                   width: 20,
+                                                                   height: 20))
+                            context.fill(circlePath, with: .color(.green))
                         }
                     }
                     
@@ -289,6 +442,9 @@ struct MainView: View {
                                     
                                     // Ažuriraj broj konekcija
                                     updateConnections(start: startPoint, end: endPoint)
+                                    
+                                    // Ažuriraj animacije krugova
+                                    updateCircleAnimations()
                                 }
                             }
                             
@@ -299,15 +455,57 @@ struct MainView: View {
                 .simultaneousGesture(
                     SpatialTapGesture()
                         .onEnded { value in
-                            guard !gameStarted && pulsingCircles.count > 0 else { return }
-                            let index = pulsingCircles.first!
-                            placedCircles.append(Circle2D(position: value.location))
-                            pulsingCircles.remove(index)
-                            if let indexToRemove = availableCircles.firstIndex(of: index) {
-                                availableCircles.remove(at: indexToRemove)
+                            let point = value.location
+                            
+                            if !gameStarted && pulsingCircles.count > 0 {
+                                // Postavljanje crvenih tačaka pre početka igre
+                                let index = pulsingCircles.first!
+                                placedCircles.append(Circle2D(position: point))
+                                pulsingCircles.remove(index)
+                                if let indexToRemove = availableCircles.firstIndex(of: index) {
+                                    availableCircles.remove(at: indexToRemove)
+                                }
+                            } else if gameStarted && pulsingCircles.count > 0 {
+                                // Postavljanje plavih i zelenih tačaka tokom igre
+                                let index = pulsingCircles.first!
+                                
+                                // Proveri da li je tačka na liniji
+                                if isValidPointPlacement(at: point) {
+                                    if index < 7 {
+                                        // Plava tačka
+                                        var newCircle = blueCircles[index]
+                                        newCircle.position = point
+                                        newCircle.isPlaced = true
+                                        blueCircles[index] = newCircle
+                                    } else {
+                                        // Zelena tačka
+                                        let greenIndex = index - 7
+                                        var newCircle = greenCircles[greenIndex]
+                                        newCircle.position = point
+                                        newCircle.isPlaced = true
+                                        greenCircles[greenIndex] = newCircle
+                                    }
+                                    pulsingCircles.remove(index)
+                                } else {
+                                    showInvalidPlacementMessage = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                        showInvalidPlacementMessage = false
+                                    }
+                                }
                             }
                         }
                 )
+                .overlay(
+                    showInvalidPlacementMessage ?
+                    Text("Plava i zelena tačka moraju biti na liniji!")
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.red.opacity(0.8))
+                        .cornerRadius(10)
+                        .transition(.scale.combined(with: .opacity))
+                    : nil
+                )
+                .animation(.easeInOut, value: showInvalidPlacementMessage)
                 .onAppear {
                     canvasSize = geometry.size
                 }
