@@ -11,6 +11,7 @@ struct Circle2D {
     var position: CGPoint
     var isAnimating: Bool = true
     var color: Color = .red
+    var connections: Int = 0
 }
 
 struct Line {
@@ -47,8 +48,8 @@ struct MainView: View {
     }
     
     private func isValidLine(from start: CGPoint, to end: CGPoint) -> Bool {
-        guard let startCircle = findNearestCircle(to: start),
-              let endCircle = findNearestCircle(to: end) else {
+        guard let _ = findNearestCircle(to: start),
+              let _ = findNearestCircle(to: end) else {
             return false
         }
         return true
@@ -71,6 +72,43 @@ struct MainView: View {
         return (blue, green)
     }
     
+    private func getConnectionCount(for point: CGPoint) -> Int {
+        if let index = placedCircles.firstIndex(where: { $0.position == point }) {
+            return placedCircles[index].connections
+        }
+        return 0
+    }
+    
+    private func wouldExceedConnectionLimit(start: CGPoint, end: CGPoint) -> Bool {
+        // Ako je self-connection, računa se kao 2 konekcije
+        if start == end {
+            let currentConnections = getConnectionCount(for: start)
+            return currentConnections + 2 > 3
+        }
+        
+        // Proveri obe tačke ako su crvene
+        let startConnections = getConnectionCount(for: start)
+        let endConnections = getConnectionCount(for: end)
+        
+        return (startConnections + 1 > 3) || (endConnections + 1 > 3)
+    }
+    
+    private func updateConnections(start: CGPoint, end: CGPoint) {
+        // Ažuriraj broj konekcija za crvene tačke
+        if let startIndex = placedCircles.firstIndex(where: { $0.position == start }) {
+            placedCircles[startIndex].connections += 1
+        }
+        
+        if start == end {
+            // Ako je self-connection, dodaj još jednu konekciju
+            if let startIndex = placedCircles.firstIndex(where: { $0.position == start }) {
+                placedCircles[startIndex].connections += 1
+            }
+        } else if let endIndex = placedCircles.firstIndex(where: { $0.position == end }) {
+            placedCircles[endIndex].connections += 1
+        }
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 40) {
@@ -86,6 +124,12 @@ struct MainView: View {
                     gameStarted = false
                     blueCircles = []
                     greenCircles = []
+                    // Reset all connection counts
+                    placedCircles = placedCircles.map { circle in
+                        var newCircle = circle
+                        newCircle.connections = 0
+                        return newCircle
+                    }
                 }) {
                     Text("New Game")
                         .font(.title)
@@ -235,14 +279,21 @@ struct MainView: View {
                             
                             if let line = currentLine,
                                let endPoint = findNearestCircle(to: value.location),
-                               let start = startPoint {
-                                var points = line.points
-                                points.append(endPoint)
-                                lines.append(Line(points: points))
+                               let startPoint = self.startPoint {
+                                
+                                // Proveri ograničenje broja konekcija
+                                if !wouldExceedConnectionLimit(start: startPoint, end: endPoint) {
+                                    var points = line.points
+                                    points.append(endPoint)
+                                    lines.append(Line(points: points))
+                                    
+                                    // Ažuriraj broj konekcija
+                                    updateConnections(start: startPoint, end: endPoint)
+                                }
                             }
                             
                             currentLine = nil
-                            startPoint = nil
+                            self.startPoint = nil
                         }
                 )
                 .simultaneousGesture(
