@@ -29,9 +29,29 @@ struct MainView: View {
     @State private var blueCircles: [Circle2D] = []
     @State private var greenCircles: [Circle2D] = []
     @State private var canvasSize: CGSize = .zero
+    @State private var startPoint: CGPoint?
+    
+    private let snapDistance: CGFloat = 15.0
     
     private var canStartGame: Bool {
         placedCircles.count >= 3
+    }
+    
+    private func findNearestCircle(to point: CGPoint) -> CGPoint? {
+        let allCircles = placedCircles + blueCircles + greenCircles
+        
+        return allCircles.compactMap { circle in
+            let distance = hypot(circle.position.x - point.x, circle.position.y - point.y)
+            return distance <= snapDistance ? circle.position : nil
+        }.first
+    }
+    
+    private func isValidLine(from start: CGPoint, to end: CGPoint) -> Bool {
+        guard let startCircle = findNearestCircle(to: start),
+              let endCircle = findNearestCircle(to: end) else {
+            return false
+        }
+        return true
     }
     
     private func createGameCircles(in size: CGSize) -> (blue: [Circle2D], green: [Circle2D]) {
@@ -149,87 +169,98 @@ struct MainView: View {
             .padding(.top, 50)
             .padding(.bottom, 20)
             
-            Canvas { context, size in
-                canvasSize = size
-                let strokeStyle = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
-                
-                // Draw lines
-                for line in lines {
-                    var path = Path()
-                    if let firstPoint = line.points.first {
-                        path.move(to: firstPoint)
-                        for point in line.points.dropFirst() {
-                            path.addLine(to: point)
+            GeometryReader { geometry in
+                Canvas { context, size in
+                    let strokeStyle = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+                    
+                    if gameStarted {
+                        // Draw completed lines
+                        for line in lines {
+                            var path = Path()
+                            if let firstPoint = line.points.first {
+                                path.move(to: firstPoint)
+                                for point in line.points.dropFirst() {
+                                    path.addLine(to: point)
+                                }
+                                context.stroke(path, with: .color(line.color), style: strokeStyle)
+                            }
                         }
-                    }
-                    context.stroke(path, with: .color(line.color), style: strokeStyle)
-                }
-                
-                if let currentLine = currentLine {
-                    var path = Path()
-                    if let firstPoint = currentLine.points.first {
-                        path.move(to: firstPoint)
-                        for point in currentLine.points.dropFirst() {
-                            path.addLine(to: point)
-                        }
-                    }
-                    context.stroke(path, with: .color(currentLine.color), style: strokeStyle)
-                }
-                
-                // Draw placed red circles - always visible
-                for circle in placedCircles {
-                    let circlePath = Path(ellipseIn: CGRect(x: circle.position.x - 10, 
-                                                           y: circle.position.y - 10,
-                                                           width: 20, 
-                                                           height: 20))
-                    context.fill(circlePath, with: .color(.red))
-                }
-            }
-            .background(Color.white)
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { value in
-                        let point = value.location
-                        if currentLine == nil {
-                            currentLine = Line(points: [point])
-                        } else {
-                            if let lastPoint = currentLine?.points.last,
-                               hypot(point.x - lastPoint.x, point.y - lastPoint.y) > 1 {
-                                currentLine?.points.append(point)
+                        
+                        // Draw current line
+                        if let currentLine = currentLine {
+                            var path = Path()
+                            if let firstPoint = currentLine.points.first {
+                                path.move(to: firstPoint)
+                                for point in currentLine.points.dropFirst() {
+                                    path.addLine(to: point)
+                                }
+                                context.stroke(path, with: .color(currentLine.color), style: strokeStyle)
                             }
                         }
                     }
-                    .onEnded { _ in
-                        if let line = currentLine {
-                            lines.append(line)
+                    
+                    // Draw placed red circles - always visible
+                    for circle in placedCircles {
+                        let circlePath = Path(ellipseIn: CGRect(x: circle.position.x - 10, 
+                                                               y: circle.position.y - 10,
+                                                               width: 20, 
+                                                               height: 20))
+                        context.fill(circlePath, with: .color(.red))
+                    }
+                }
+                .background(Color.white)
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                        .onChanged { value in
+                            guard gameStarted else { return }
+                            
+                            let point = value.location
+                            
+                            if currentLine == nil {
+                                // Počni liniju samo ako je početna tačka blizu neke tačke
+                                if let nearestPoint = findNearestCircle(to: point) {
+                                    currentLine = Line(points: [nearestPoint])
+                                    startPoint = nearestPoint
+                                }
+                            } else {
+                                // Dodaj tačke za freehand crtanje
+                                if let lastPoint = currentLine?.points.last,
+                                   hypot(point.x - lastPoint.x, point.y - lastPoint.y) > 1 {
+                                    currentLine?.points.append(point)
+                                }
+                            }
+                        }
+                        .onEnded { value in
+                            guard gameStarted else { return }
+                            
+                            if let line = currentLine,
+                               let endPoint = findNearestCircle(to: value.location),
+                               let start = startPoint {
+                                var points = line.points
+                                points.append(endPoint)
+                                lines.append(Line(points: points))
+                            }
+                            
                             currentLine = nil
+                            startPoint = nil
                         }
-                    }
-            )
-            .simultaneousGesture(
-                SpatialTapGesture()
-                    .onEnded { value in
-                        guard pulsingCircles.count > 0 else { return }
-                        let index = pulsingCircles.first!
-                        placedCircles.append(Circle2D(position: value.location))
-                        pulsingCircles.remove(index)
-                        if let indexToRemove = availableCircles.firstIndex(of: index) {
-                            availableCircles.remove(at: indexToRemove)
+                )
+                .simultaneousGesture(
+                    SpatialTapGesture()
+                        .onEnded { value in
+                            guard !gameStarted && pulsingCircles.count > 0 else { return }
+                            let index = pulsingCircles.first!
+                            placedCircles.append(Circle2D(position: value.location))
+                            pulsingCircles.remove(index)
+                            if let indexToRemove = availableCircles.firstIndex(of: index) {
+                                availableCircles.remove(at: indexToRemove)
+                            }
                         }
-                    }
-            )
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onEnded { value in
-                        guard pulsingCircles.count > 0 else { return }
-                        let index = pulsingCircles.first!
-                        placedCircles.append(Circle2D(position: value.location))
-                        pulsingCircles.remove(index)
-                        if let indexToRemove = availableCircles.firstIndex(of: index) {
-                            availableCircles.remove(at: indexToRemove)
-                        }
-                    }
-            )
+                )
+                .onAppear {
+                    canvasSize = geometry.size
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 15)
@@ -278,3 +309,4 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
+
