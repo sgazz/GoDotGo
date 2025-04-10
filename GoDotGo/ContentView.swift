@@ -79,33 +79,106 @@ struct MainView: View {
         return 0
     }
     
-    private func wouldExceedConnectionLimit(start: CGPoint, end: CGPoint) -> Bool {
-        // Ako je self-connection, računa se kao 2 konekcije
-        if start == end {
-            let currentConnections = getConnectionCount(for: start)
-            return currentConnections + 2 > 3
+    private func getCircleAtPosition(_ position: CGPoint) -> (circle: Circle2D, type: CircleType, index: Int)? {
+        // Proveri crvene tačke
+        if let index = placedCircles.firstIndex(where: { $0.position == position }) {
+            return (placedCircles[index], .red, index)
         }
         
-        // Proveri obe tačke ako su crvene
-        let startConnections = getConnectionCount(for: start)
-        let endConnections = getConnectionCount(for: end)
+        // Proveri plave tačke
+        if let index = blueCircles.firstIndex(where: { $0.position == position && $0.isPlaced }) {
+            return (blueCircles[index], .blue, index)
+        }
         
-        return (startConnections + 1 > 3) || (endConnections + 1 > 3)
+        // Proveri zelene tačke
+        if let index = greenCircles.firstIndex(where: { $0.position == position && $0.isPlaced }) {
+            return (greenCircles[index], .green, index)
+        }
+        
+        return nil
+    }
+    
+    private func countInitialConnections(at point: CGPoint) -> Int {
+        // Kada se tačka postavi na liniju, ona dobija 2 konekcije
+        // jer preseca liniju na kojoj se nalazi
+        for line in lines {
+            if isPointOnLine(point: point, line: line) {
+                return 2
+            }
+        }
+        return 0
+    }
+    
+    private func wouldExceedConnectionLimit(start: CGPoint, end: CGPoint) -> Bool {
+        guard let startCircle = getCircleAtPosition(start),
+              let endCircle = getCircleAtPosition(end) else {
+            return true
+        }
+        
+        // Ako je self-connection, računa se kao 2 konekcije
+        if start == end {
+            let newConnections = startCircle.circle.connections + 2
+            print("Self connection check - Current: \(startCircle.circle.connections), New: \(newConnections)")
+            return newConnections > 3
+        }
+        
+        // Proveri obe tačke
+        let startNewConnections = startCircle.circle.connections + 1
+        let endNewConnections = endCircle.circle.connections + 1
+        
+        print("Connection check - Start: \(startCircle.circle.connections) -> \(startNewConnections), End: \(endCircle.circle.connections) -> \(endNewConnections)")
+        
+        return startNewConnections > 3 || endNewConnections > 3
     }
     
     private func updateConnections(start: CGPoint, end: CGPoint) {
-        // Ažuriraj broj konekcija za crvene tačke
-        if let startIndex = placedCircles.firstIndex(where: { $0.position == start }) {
-            placedCircles[startIndex].connections += 1
+        print("Updating connections - Start: \(start), End: \(end)")
+        
+        // Ažuriraj broj konekcija za početnu tačku
+        if let startCircle = getCircleAtPosition(start) {
+            switch startCircle.type {
+            case .red:
+                placedCircles[startCircle.index].connections += 1
+                print("Red circle at \(start) now has \(placedCircles[startCircle.index].connections) connections")
+            case .blue:
+                blueCircles[startCircle.index].connections += 1
+                print("Blue circle at \(start) now has \(blueCircles[startCircle.index].connections) connections")
+            case .green:
+                greenCircles[startCircle.index].connections += 1
+                print("Green circle at \(start) now has \(greenCircles[startCircle.index].connections) connections")
+            }
         }
         
+        // Ako je self-connection, dodaj još jednu konekciju istoj tački
         if start == end {
-            // Ako je self-connection, dodaj još jednu konekciju
-            if let startIndex = placedCircles.firstIndex(where: { $0.position == start }) {
-                placedCircles[startIndex].connections += 1
+            if let startCircle = getCircleAtPosition(start) {
+                switch startCircle.type {
+                case .red:
+                    placedCircles[startCircle.index].connections += 1
+                    print("Red circle self-connection at \(start) now has \(placedCircles[startCircle.index].connections) connections")
+                case .blue:
+                    blueCircles[startCircle.index].connections += 1
+                    print("Blue circle self-connection at \(start) now has \(blueCircles[startCircle.index].connections) connections")
+                case .green:
+                    greenCircles[startCircle.index].connections += 1
+                    print("Green circle self-connection at \(start) now has \(greenCircles[startCircle.index].connections) connections")
+                }
             }
-        } else if let endIndex = placedCircles.firstIndex(where: { $0.position == end }) {
-            placedCircles[endIndex].connections += 1
+        } else {
+            // Ažuriraj broj konekcija za krajnju tačku
+            if let endCircle = getCircleAtPosition(end) {
+                switch endCircle.type {
+                case .red:
+                    placedCircles[endCircle.index].connections += 1
+                    print("Red circle at \(end) now has \(placedCircles[endCircle.index].connections) connections")
+                case .blue:
+                    blueCircles[endCircle.index].connections += 1
+                    print("Blue circle at \(end) now has \(blueCircles[endCircle.index].connections) connections")
+                case .green:
+                    greenCircles[endCircle.index].connections += 1
+                    print("Green circle at \(end) now has \(greenCircles[endCircle.index].connections) connections")
+                }
+            }
         }
     }
     
@@ -208,6 +281,10 @@ struct MainView: View {
                 greenCircles[i].isPlaced = shouldAnimate
             }
         }
+    }
+    
+    private enum CircleType {
+        case red, blue, green
     }
     
     var body: some View {
@@ -471,11 +548,14 @@ struct MainView: View {
                                 
                                 // Proveri da li je tačka na liniji
                                 if isValidPointPlacement(at: point) {
+                                    let initialConnections = countInitialConnections(at: point)
+                                    
                                     if index < 7 {
                                         // Plava tačka
                                         var newCircle = blueCircles[index]
                                         newCircle.position = point
                                         newCircle.isPlaced = true
+                                        newCircle.connections = initialConnections
                                         blueCircles[index] = newCircle
                                     } else {
                                         // Zelena tačka
@@ -483,6 +563,7 @@ struct MainView: View {
                                         var newCircle = greenCircles[greenIndex]
                                         newCircle.position = point
                                         newCircle.isPlaced = true
+                                        newCircle.connections = initialConnections
                                         greenCircles[greenIndex] = newCircle
                                     }
                                     pulsingCircles.remove(index)
