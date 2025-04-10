@@ -32,6 +32,7 @@ struct MainView: View {
     @State private var canvasSize: CGSize = .zero
     @State private var startPoint: CGPoint?
     @State private var showInvalidPlacementMessage: Bool = false
+    @State private var canSelectNewPoint: Bool = true
     
     private let snapDistance: CGFloat = 15.0
     
@@ -239,6 +240,11 @@ struct MainView: View {
     }
     
     private func isValidPointPlacement(at point: CGPoint) -> Bool {
+        // Ako ne možemo da postavimo novu tačku, odmah vrati false
+        if !canSelectNewPoint {
+            return false
+        }
+        
         // Ako je tačka preblizu postojećoj postavljenoj tački, nije validna
         if isPointNearExistingPlacedPoint(point: point) {
             return false
@@ -295,13 +301,13 @@ struct MainView: View {
                 Button(action: {
                     lines = []
                     currentLine = nil
-                    // Reset circles
                     placedCircles = []
                     availableCircles = Array(0..<7)
                     pulsingCircles = []
                     gameStarted = false
                     blueCircles = []
                     greenCircles = []
+                    canSelectNewPoint = true
                     // Reset all connection counts
                     placedCircles = placedCircles.map { circle in
                         var newCircle = circle
@@ -522,6 +528,7 @@ struct MainView: View {
                                     
                                     // Ažuriraj animacije krugova
                                     updateCircleAnimations()
+                                    canSelectNewPoint = true
                                 }
                             }
                             
@@ -557,6 +564,7 @@ struct MainView: View {
                                         newCircle.isPlaced = true
                                         newCircle.connections = initialConnections
                                         blueCircles[index] = newCircle
+                                        canSelectNewPoint = false
                                     } else {
                                         // Zelena tačka
                                         let greenIndex = index - 7
@@ -565,6 +573,7 @@ struct MainView: View {
                                         newCircle.isPlaced = true
                                         newCircle.connections = initialConnections
                                         greenCircles[greenIndex] = newCircle
+                                        canSelectNewPoint = false
                                     }
                                     pulsingCircles.remove(index)
                                 } else {
